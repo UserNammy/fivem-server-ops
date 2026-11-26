@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: fivem
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# Alertmanager is not part of the stack yet (see README roadmap); alerts are
+# visible in the Prometheus UI under /alerts.
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: fivem
+    static_configs:
+      - targets: ["exporter:9877"]
+        labels:
+          server: main
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

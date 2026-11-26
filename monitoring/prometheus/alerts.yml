@@ -1,0 +1,71 @@
+groups:
+  - name: fivem
+    rules:
+      - alert: FiveMServerDown
+        expr: fivem_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FiveM server {{ $labels.server }} is down"
+          description: >-
+            The exporter could not reach /info.json or /players.json for 2 minutes.
+            Check `docker compose ps` and `docker compose logs --tail=200 fxserver`.
+
+      - alert: FiveMExporterDown
+        expr: up{job="fivem"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FiveM exporter is not being scraped"
+          description: "Prometheus cannot scrape {{ $labels.instance }}; server health is unknown."
+
+      - alert: FiveMPlayerCountDrop
+        # More than half of the players disappeared compared to the last 15 min
+        # peak, while the server still answers: typical of a crashed resource,
+        # a network issue or a mass timeout. Ignored on quiet servers.
+        expr: |
+          (
+            fivem_players_online
+              < 0.5 * max_over_time(fivem_players_online[15m])
+          )
+          and on (instance)
+          max_over_time(fivem_players_online[15m]) >= 10
+          and on (instance)
+          fivem_up == 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Player count dropped sharply on {{ $labels.server }}"
+          description: >-
+            {{ $value }} players online, less than half of the 15 minute peak.
+            Check server console and recent resource restarts.
+
+      - alert: FiveMServerFull
+        expr: fivem_players_online >= fivem_players_max and fivem_players_max > 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "FiveM server is full"
+          description: "All {{ $value }} slots used for 10 minutes; consider raising sv_maxclients."
+
+      - alert: FiveMSlowResponses
+        expr: max by (instance) (fivem_http_response_seconds) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FXServer HTTP endpoints are slow"
+          description: "Endpoints take more than 1s to answer (server thread hitches or host overload)."
+
+      - alert: FiveMHighPlayerPing
+        expr: fivem_player_ping_avg_ms > 150 and fivem_players_online > 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Average player ping above 150 ms"
+          description: "Average ping is {{ $value }} ms; check host network and DDoS mitigation."

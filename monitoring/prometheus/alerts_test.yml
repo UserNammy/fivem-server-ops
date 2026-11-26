@@ -1,0 +1,59 @@
+# Unit tests for alert rules: promtool test rules monitoring/prometheus/alerts_test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: server down fires after 2 minutes
+    interval: 1m
+    input_series:
+      - series: 'fivem_up{instance="exporter:9877",job="fivem",server="main"}'
+        values: "1 1 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: FiveMServerDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: FiveMServerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: exporter:9877
+              job: fivem
+              server: main
+            exp_annotations:
+              summary: "FiveM server main is down"
+              description: "The exporter could not reach /info.json or /players.json for 2 minutes. Check `docker compose ps` and `docker compose logs --tail=200 fxserver`."
+
+  - name: player drop fires on busy server
+    interval: 1m
+    input_series:
+      - series: 'fivem_players_online{instance="exporter:9877",job="fivem",server="main"}'
+        values: "40 40 40 40 40 12 12 12 12 12"
+      - series: 'fivem_up{instance="exporter:9877",job="fivem",server="main"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FiveMPlayerCountDrop
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: exporter:9877
+              job: fivem
+              server: main
+            exp_annotations:
+              summary: "Player count dropped sharply on main"
+              description: "12 players online, less than half of the 15 minute peak. Check server console and recent resource restarts."
+
+  - name: player drop ignored on quiet server
+    interval: 1m
+    input_series:
+      - series: 'fivem_players_online{instance="exporter:9877",job="fivem",server="main"}'
+        values: "6 6 6 6 1 1 1 1 1 1"
+      - series: 'fivem_up{instance="exporter:9877",job="fivem",server="main"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FiveMPlayerCountDrop
+        exp_alerts: []
