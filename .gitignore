@@ -1,0 +1,35 @@
+# Secrets / local config
+.env
+*.env.local
+ansible/inventory.ini
+ansible/group_vars/all/vault.yml
+rclone.conf
+
+# FXServer artifacts must never be committed (Cfx.re terms)
+fx.tar.xz
+artifacts/
+alpine/
+
+# Runtime data
+server-data/resources/*
+!server-data/resources/.gitkeep
+server-data/cache/
+txData/
+backups/
+*.sql
+*.sql.gz
+*.tar.gz
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.coverage
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
