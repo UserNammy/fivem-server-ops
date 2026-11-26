@@ -69,6 +69,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Scan the full history with the gitleaks CLI. The action computes a
+      # `<first>^..<last>` range that breaks on a repository's first push.
+      - name: Scan git history for secrets
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.3 \
+            git /repo --redact --verbose
