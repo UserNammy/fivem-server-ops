@@ -28,6 +28,9 @@ ARG ARTIFACT_BASE_URL=https://runtime.fivem.net/artifacts/fivem/build_proot_linu
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Debian package versions are not pinned on purpose: pinned versions disappear
+# from the mirrors after security updates and break the build.
+# hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
  && rm -rf /var/lib/apt/lists/*
@@ -64,6 +67,7 @@ LABEL org.opencontainers.image.title="fxserver" \
 # gettext-base -> envsubst (server.cfg templating)
 # tini         -> proper PID 1, forwards SIGTERM so FXServer shuts down cleanly
 # curl         -> healthcheck
+# hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl gettext-base tini \
  && rm -rf /var/lib/apt/lists/* \
