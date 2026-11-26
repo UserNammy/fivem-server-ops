@@ -24,7 +24,9 @@ tests:
               server: main
             exp_annotations:
               summary: "FiveM server main is down"
-              description: "The exporter could not reach /info.json or /players.json for 2 minutes. Check `docker compose ps` and `docker compose logs --tail=200 fxserver`."
+              description: >-
+                The exporter could not reach /info.json or /players.json for 2 minutes.
+                Check `docker compose ps` and `docker compose logs --tail=200 fxserver`.
 
   - name: player drop fires on busy server
     interval: 1m
