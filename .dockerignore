@@ -1,0 +1,5 @@
+# Build context is the repo root: only send what the Dockerfiles COPY.
+*
+!docker/entrypoint.sh
+!docker/healthcheck.sh
+!server-data/server.cfg.template
