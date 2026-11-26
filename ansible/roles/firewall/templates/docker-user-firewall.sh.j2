@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Filter traffic to Docker-published admin ports in the DOCKER-USER chain.
+# Rules are rebuilt from scratch on every run (idempotent).
+set -euo pipefail
+
+CHAIN=DOCKER-USER
+EXT_IF="{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+
+iptables -N "${CHAIN}" 2>/dev/null || true
+iptables -F "${CHAIN}"
+
+# Return traffic of established connections is always fine.
+iptables -A "${CHAIN}" -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+
+# txAdmin ({{ txadmin_port }}/tcp): admin CIDRs only, drop everyone else.
+{% for cidr in txadmin_allowed_cidrs %}
+iptables -A "${CHAIN}" -i "${EXT_IF}" -p tcp -s {{ cidr }} \
+  -m conntrack --ctorigdstport {{ txadmin_port }} --ctdir ORIGINAL -j RETURN
+{% endfor %}
+iptables -A "${CHAIN}" -i "${EXT_IF}" -p tcp \
+  -m conntrack --ctorigdstport {{ txadmin_port }} --ctdir ORIGINAL -j DROP
+
+iptables -A "${CHAIN}" -j RETURN

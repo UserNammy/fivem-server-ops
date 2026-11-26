@@ -1,0 +1,85 @@
+---
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+# Allow SSH before enabling the firewall so we never lock ourselves out.
+- name: Allow SSH (rate limited)
+  community.general.ufw:
+    rule: limit
+    port: "{{ ssh_port | string }}"
+    proto: tcp
+    comment: ssh
+
+- name: Allow FiveM game traffic (TCP + UDP)
+  community.general.ufw:
+    rule: allow
+    port: "{{ fivem_port | string }}"
+    proto: "{{ item }}"
+    comment: "fivem {{ item }}"
+  loop: [tcp, udp]
+
+- name: Allow txAdmin from admin CIDRs only
+  community.general.ufw:
+    rule: allow
+    port: "{{ txadmin_port | string }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: txadmin-admin
+  loop: "{{ txadmin_allowed_cidrs }}"
+
+- name: Default deny incoming, allow outgoing
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    default: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
+    logging: "low"
+
+# Docker publishes ports through its own iptables chains, BEFORE ufw rules are
+# evaluated. The DOCKER-USER chain is the supported hook to filter that traffic
+# (https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+# This service restricts the txAdmin port at that level too, in case the
+# compose file binds it to 0.0.0.0.
+- name: Install DOCKER-USER firewall script
+  ansible.builtin.template:
+    src: docker-user-firewall.sh.j2
+    dest: /usr/local/sbin/docker-user-firewall.sh
+    owner: root
+    group: root
+    mode: "0750"
+  notify: Restart docker-user-firewall
+
+- name: Install DOCKER-USER firewall systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker-user-firewall.service
+    content: |
+      [Unit]
+      Description=Restrict Docker-published admin ports (DOCKER-USER chain)
+      After=docker.service
+      Requires=docker.service
+      PartOf=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/docker-user-firewall.sh
+
+      [Install]
+      WantedBy=docker.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker-user-firewall
+
+- name: Enable DOCKER-USER firewall service
+  ansible.builtin.systemd:
+    name: docker-user-firewall.service
+    enabled: true
+    daemon_reload: true

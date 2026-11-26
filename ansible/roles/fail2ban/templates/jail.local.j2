@@ -1,0 +1,23 @@
+# {{ ansible_managed }}
+[DEFAULT]
+bantime  = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+ignoreip = {{ fail2ban_ignoreip | join(' ') }}
+banaction = ufw
+# Debian 12 / recent Ubuntu log sshd to the journal, not /var/log/auth.log.
+backend  = systemd
+
+[sshd]
+enabled = true
+port    = {{ ssh_port }}
+mode    = aggressive
+
+# Repeat offenders get banned for a week.
+[recidive]
+enabled  = true
+backend  = auto
+logpath  = /var/log/fail2ban.log
+bantime  = 1w
+findtime = 1d
+maxretry = 5

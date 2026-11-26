@@ -1,0 +1,50 @@
+---
+# Prepare the application directory. The .env file (secrets) is NOT managed
+# here on purpose: copy it manually or template it from ansible-vault.
+- name: Create application directory
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0750"
+
+- name: Sync repository files to the host
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../"
+    dest: "{{ app_dir }}/"
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=.env"
+      - "--exclude=server-data/resources"
+      - "--exclude=ansible/inventory.ini"
+  # synchronize runs rsync from the controller; with become it uses
+  # "sudo rsync" on the remote side.
+  when: app_sync_from_controller | default(true)
+
+- name: Fix ownership after sync
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    recurse: true
+
+- name: Create resources directory
+  ansible.builtin.file:
+    path: "{{ app_dir }}/server-data/resources"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+
+- name: Check for .env
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/.env"
+  register: env_file
+
+- name: Remind to provide .env
+  ansible.builtin.debug:
+    msg: >-
+      {{ app_dir }}/.env is missing. Copy .env.example, fill in secrets, then run
+      'docker compose up -d --build' as {{ deploy_user }}.
+  when: not env_file.stat.exists

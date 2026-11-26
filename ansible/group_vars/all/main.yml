@@ -1,0 +1,34 @@
+---
+# Deploy user that owns the stack (uid 1000 matches the container's fivem user,
+# so bind-mounted resources/ are writable without chmod 777).
+deploy_user: fivem
+deploy_uid: 1000
+deploy_ssh_public_keys: []
+#  - "ssh-ed25519 AAAA... you@laptop"
+
+app_dir: /opt/fivem-server-ops
+timezone: Europe/Paris
+
+# SSH
+ssh_port: 22
+ssh_disable_password_auth: true
+ssh_disable_root_login: true
+
+# Game ports (public)
+fivem_port: 30120
+
+# txAdmin: only these CIDRs may reach the panel. Keep it empty to allow
+# nobody (use an SSH tunnel instead, the recommended option).
+txadmin_port: 40120
+txadmin_allowed_cidrs: []
+#  - "198.51.100.23/32"
+
+# Monitoring UIs stay on localhost (Grafana 3000, Prometheus 9090): SSH tunnel.
+
+# fail2ban
+fail2ban_bantime: 1h
+fail2ban_findtime: 10m
+fail2ban_maxretry: 5
+fail2ban_ignoreip:
+  - 127.0.0.1/8
+  - ::1

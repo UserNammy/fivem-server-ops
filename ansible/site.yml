@@ -1,0 +1,30 @@
+---
+# Provision a fresh Debian 12 / Ubuntu 22.04+ VPS for the FiveM stack.
+#
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-playbook -i inventory.ini site.yml
+#
+# Idempotent: safe to re-run after changing group_vars.
+- name: Provision FiveM host
+  hosts: fivem
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Assert supported distribution
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'Debian'
+        fail_msg: "Only Debian/Ubuntu hosts are supported"
+
+  roles:
+    - role: base
+      tags: [base]
+    - role: docker
+      tags: [docker]
+    - role: firewall
+      tags: [firewall]
+    - role: fail2ban
+      tags: [fail2ban]
+    - role: app
+      tags: [app]
