@@ -1,0 +1,191 @@
+# fivem-server-ops stack
+#
+#   docker compose up -d --build                      # game server + db + backups
+#   docker compose --profile monitoring up -d         # + exporter, Prometheus, Grafana
+#   docker compose --profile restore run --rm restore --list
+#
+# Requires a .env file (cp .env.example .env).
+
+name: fivem
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backup-env: &backup-env
+  DB_HOST: mariadb
+  DB_USER: root
+  DB_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+  DB_NAME: ${MARIADB_DATABASE:-fivem}
+  BACKUP_KEEP_LOCAL: ${BACKUP_KEEP_LOCAL:-8}
+  BACKUP_KEEP_REMOTE_DAYS: ${BACKUP_KEEP_REMOTE_DAYS:-30}
+  BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+  BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+  # rclone remote defined purely through env vars (see .env.example)
+  RCLONE_CONFIG_S3BACKUP_TYPE: ${RCLONE_CONFIG_S3BACKUP_TYPE:-s3}
+  RCLONE_CONFIG_S3BACKUP_PROVIDER: ${RCLONE_CONFIG_S3BACKUP_PROVIDER:-Other}
+  RCLONE_CONFIG_S3BACKUP_ENDPOINT: ${RCLONE_CONFIG_S3BACKUP_ENDPOINT:-}
+  RCLONE_CONFIG_S3BACKUP_REGION: ${RCLONE_CONFIG_S3BACKUP_REGION:-auto}
+  RCLONE_CONFIG_S3BACKUP_ACCESS_KEY_ID: ${RCLONE_CONFIG_S3BACKUP_ACCESS_KEY_ID:-}
+  RCLONE_CONFIG_S3BACKUP_SECRET_ACCESS_KEY: ${RCLONE_CONFIG_S3BACKUP_SECRET_ACCESS_KEY:-}
+  TZ: ${TZ:-UTC}
+
+services:
+  fxserver:
+    image: ${FXSERVER_IMAGE:-fivem-server-ops/fxserver:local}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        ARTIFACT_BUILD: ${ARTIFACT_BUILD:?set ARTIFACT_BUILD in .env}
+        ARTIFACT_SHA256: ${ARTIFACT_SHA256:-}
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      FIVEM_LICENSE_KEY: ${FIVEM_LICENSE_KEY:?set FIVEM_LICENSE_KEY in .env}
+      FIVEM_PORT: ${FIVEM_PORT:-30120}
+      FIVEM_HOSTNAME: ${FIVEM_HOSTNAME:-fivem-server-ops}
+      FIVEM_PROJECT_NAME: ${FIVEM_PROJECT_NAME:-fivem-server-ops}
+      FIVEM_PROJECT_DESC: ${FIVEM_PROJECT_DESC:-Containerized FXServer}
+      FIVEM_TAGS: ${FIVEM_TAGS:-default}
+      FIVEM_LOCALE: ${FIVEM_LOCALE:-en-US}
+      FIVEM_MAX_CLIENTS: ${FIVEM_MAX_CLIENTS:-48}
+      FIVEM_GAME_BUILD: ${FIVEM_GAME_BUILD:-3095}
+      STEAM_WEBAPIKEY: ${STEAM_WEBAPIKEY:-}
+      MYSQL_CONNECTION_STRING: mysql://${MARIADB_USER}:${MARIADB_PASSWORD}@mariadb:3306/${MARIADB_DATABASE}?charset=utf8mb4
+      TXADMIN_ENABLED: ${TXADMIN_ENABLED:-false}
+      TXHOST_TXA_PORT: ${TXADMIN_PORT:-40120}
+      TZ: ${TZ:-UTC}
+    ports:
+      # Game traffic must be public, TCP and UDP.
+      - "${FIVEM_PORT:-30120}:${FIVEM_PORT:-30120}/tcp"
+      - "${FIVEM_PORT:-30120}:${FIVEM_PORT:-30120}/udp"
+      # txAdmin: localhost only by default. Docker-published ports bypass UFW,
+      # so exposing 0.0.0.0 here would ignore host firewall rules.
+      - "${TXADMIN_BIND:-127.0.0.1}:${TXADMIN_PORT:-40120}:${TXADMIN_PORT:-40120}/tcp"
+    volumes:
+      - ./server-data/resources:/srv/fivem/server-data/resources
+      - fxserver-cache:/srv/fivem/server-data/cache
+      - txdata:/srv/fivem/txData
+    networks: [backend]
+    stop_grace_period: 30s
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    logging: *default-logging
+
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-fivem}
+      MARIADB_USER: ${MARIADB_USER:-fivem}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+      TZ: ${TZ:-UTC}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=512M
+      - --max-connections=200
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    # No published port: only reachable on the internal backend network.
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+
+  backup:
+    image: ${BACKUP_IMAGE:-fivem-server-ops/backup:local}
+    build:
+      context: backup
+    restart: unless-stopped
+    init: true
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    # Only backup-related variables: the license key never reaches this container.
+    environment:
+      <<: *backup-env
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 */6 * * *}
+    volumes:
+      - ./server-data/resources:/data/server-data/resources:ro
+      - backups:/backups
+    networks: [backend]
+    logging: *default-logging
+
+  # One-shot restore helper: same image, but resources mounted read-write.
+  restore:
+    image: ${BACKUP_IMAGE:-fivem-server-ops/backup:local}
+    profiles: [restore]
+    entrypoint: ["/usr/local/bin/restore.sh"]
+    environment: *backup-env
+    volumes:
+      - ./server-data/resources:/data/server-data/resources
+      - backups:/backups
+    networks: [backend]
+
+  exporter:
+    image: ${EXPORTER_IMAGE:-fivem-server-ops/exporter:local}
+    build:
+      context: monitoring/exporter
+    profiles: [monitoring]
+    restart: unless-stopped
+    environment:
+      FIVEM_URL: http://fxserver:${FIVEM_PORT:-30120}
+      EXPORTER_PORT: "9877"
+    networks: [backend, monitoring]
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [monitoring]
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    profiles: [monitoring]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [monitoring]
+    logging: *default-logging
+
+networks:
+  backend:
+  monitoring:
+
+volumes:
+  mariadb-data:
+  fxserver-cache:
+  txdata:
+  backups:
+  prometheus-data:
+  grafana-data:
