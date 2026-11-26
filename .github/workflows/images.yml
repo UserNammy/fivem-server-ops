@@ -1,0 +1,104 @@
+name: images
+
+# Builds all images and pushes the exporter and backup images to GHCR.
+#
+# The FXServer image contains Cfx.re artifacts. To avoid redistributing them
+# it is only BUILT in CI (to catch Dockerfile regressions) and pushed only if
+# the repository variable FXSERVER_PUSH is "true", which you should enable
+# only with a PRIVATE GHCR package.
+#
+# Required repository variable: FXSERVER_ARTIFACT_BUILD (e.g. NNNNN-<sha1>)
+# Optional repository variable: FXSERVER_ARTIFACT_SHA256
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: exporter
+            context: monitoring/exporter
+            dockerfile: monitoring/exporter/Dockerfile
+            push: true
+          - name: backup
+            context: backup
+            dockerfile: backup/Dockerfile
+            push: true
+          - name: fxserver
+            context: .
+            dockerfile: docker/Dockerfile
+            push: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip fxserver build when no artifact is pinned
+        id: guard
+        run: |
+          if [[ "${{ matrix.name }}" == "fxserver" && -z "${{ vars.FXSERVER_ARTIFACT_BUILD }}" ]]; then
+            echo "FXSERVER_ARTIFACT_BUILD repository variable not set, skipping fxserver build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether to push
+        id: push
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          push=false
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            if [[ "${{ matrix.push }}" == "true" || ( "${{ matrix.name }}" == "fxserver" && "${{ vars.FXSERVER_PUSH }}" == "true" ) ]]; then
+              push=true
+            fi
+          fi
+          echo "push=${push}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.guard.outputs.skip != 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.guard.outputs.skip != 'true' && steps.push.outputs.push == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        if: steps.guard.outputs.skip != 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ steps.push.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ARTIFACT_BUILD=${{ vars.FXSERVER_ARTIFACT_BUILD }}
+            ARTIFACT_SHA256=${{ vars.FXSERVER_ARTIFACT_SHA256 }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
