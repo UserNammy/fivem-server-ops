@@ -1,0 +1,59 @@
+# -----------------------------------------------------------------------------
+# server.cfg TEMPLATE
+#
+# Rendered at container start by docker/entrypoint.sh with envsubst.
+# Only the whitelisted ${VARIABLES} listed in the entrypoint are replaced.
+# Never commit a rendered server.cfg: it contains the license key.
+# -----------------------------------------------------------------------------
+
+## Network endpoints (game traffic: TCP + UDP on the same port)
+endpoint_add_tcp "0.0.0.0:${FIVEM_PORT}"
+endpoint_add_udp "0.0.0.0:${FIVEM_PORT}"
+
+## Database (oxmysql reads this convar)
+set mysql_connection_string "${MYSQL_CONNECTION_STRING}"
+set mysql_ui false
+
+## Default resources from citizenfx/cfx-server-data
+ensure mapmanager
+ensure chat
+ensure spawnmanager
+ensure sessionmanager
+ensure basic-gamemode
+ensure hardcap
+
+## Framework / custom resources
+## oxmysql must be installed in resources/ before uncommenting.
+# ensure oxmysql
+# ensure [standalone]
+# ensure [jobs]
+
+## Server identity
+sv_hostname "${FIVEM_HOSTNAME}"
+sets sv_projectName "${FIVEM_PROJECT_NAME}"
+sets sv_projectDesc "${FIVEM_PROJECT_DESC}"
+sets tags "${FIVEM_TAGS}"
+sets locale "${FIVEM_LOCALE}"
+
+## Capacity / game build
+sv_maxclients ${FIVEM_MAX_CLIENTS}
+sv_enforceGameBuild ${FIVEM_GAME_BUILD}
+set onesync on
+
+## Security
+# Hide the server from the public server list while testing:
+# sv_master1 ""
+sv_scriptHookAllowed 0
+# Do not leak player identifiers through /players.json (scraped by the exporter).
+sv_exposePlayerIdentifiersInHttpEndpoint false
+
+## Steam Web API key (optional, enables Steam identifiers)
+set steam_webApiKey "${STEAM_WEBAPIKEY}"
+
+## Permissions
+# add_ace group.admin command allow
+# add_ace group.admin command.quit deny
+# add_principal identifier.fivem:1 group.admin
+
+## License key: injected from the environment, generated at https://portal.cfx.re
+sv_licenseKey "${FIVEM_LICENSE_KEY}"
